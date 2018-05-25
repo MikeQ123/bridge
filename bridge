@@ -399,6 +399,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
                         # first read from _in ONLY if buf is empty
                         _in.read_nonblock(MAXBUF,buf) if buf.empty?
                     rescue IO::WaitReadable, Errno::EINTR
+                        buf.clear
                         select([_in],nil,nil,3)
                         retry if paired_thread.alive?
                         break
