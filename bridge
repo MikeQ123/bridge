@@ -50,33 +50,44 @@ class String
     end
 end
 
-case ARGV.size
-    when 2
+$auth_info = nil
+
+case ARGV[0]
+    when "server"
         server=true
-        location=ARGV[1]
-     when 4
+        location=ARGV[2]
+        if ARGV.size == 4
+            $auth_info=ARGV[3]
+        end
+    when "client"
         server=false
-        url=ARGV[1]
-        remote_host=ARGV[2]
-        remote_port=ARGV[3].to_i
-    else
-    $stderr.puts <<-EOF.strip_heredoc
-	Use as server:
-	#$0 localPort bridgeLocation
-	
-	Use as client:
-	#$0 localPort|STDIN bridgeURL remoteAddress remotePort
-	
-	Ex:
-	bridge$ #$0 8080 /bridge
-	
-	client$ #$0 8022 http://mybridge:8080/bridge remoteServer 22
-	client$ ssh localhost -p 8022
-	EOF
-    exit
+        url=ARGV[2]
+        remote_host=ARGV[3]
+        remote_port=ARGV[4].to_i
+        if ARGV.size == 6
+            $auth_info=ARGV[5]
+        end
+else
+$stderr.puts <<-EOF.strip_heredoc
+Use as server:
+#$0 server localPort bridgeLocation [auth]
+
+Use as client:
+#$0 client localPort|STDIN bridgeURL remoteAddress remotePort [auth]
+
+Ex:
+bridge$ #$0 server 8080 /bridge test:test
+
+client$ #$0 client 8022 http://mybridge:8080/bridge remoteServer 22 test:test
+client$ ssh localhost -p 8022
+EOF
+exit
 end
 
-localPort=ARGV[0]
+localPort=ARGV[1]
+if $auth_info != nil
+    $auth_user_pwd = $auth_info.split(':')
+end
 
 require 'socket'
 require 'thread'
@@ -92,6 +103,25 @@ if server
 
     class BridgeServlet < WEBrick::HTTPServlet::AbstractServlet
         @@connections = {}
+        @@config = nil
+
+        def do_check_auth(req, res)
+            if @@config == nil and $auth_info != nil
+                @@config = { :Realm => 'Welcome to server' }
+                htpasswd = WEBrick::HTTPAuth::Htpasswd.new 'my_password_file'
+                auth_datas = $auth_info.split(":")
+                htpasswd.set_passwd @@config[:Realm], auth_datas[0], auth_datas[1]
+                htpasswd.flush
+                @@config[:UserDB] = htpasswd
+                puts('password enable')
+            end
+            if @@config != nil
+                @basic_auth = WEBrick::HTTPAuth::BasicAuth.new @@config
+            end
+            if @basic_auth != nil
+                @basic_auth.authenticate req, res
+            end
+        end
 
         def get_socket(req,res)
             conn_id = req.path.split("/").last
@@ -112,8 +142,11 @@ if server
         end
 
         def do_POST(req, res)
+            do_check_auth(req, res)
             conn_id = req.path.split("/").last
-            (remote_host,colon,remote_port)=req.body.rpartition(":")
+            # debug
+            puts(req.body)
+            (remote_host,colon,remote_port)=req.body.rpartition("=")
             remote_port=remote_port.to_i
             $stderr.puts "[#{conn_id}] Opening connection to #{remote_host}:#{remote_port} for #{req.peeraddr}..."
             begin
@@ -145,6 +178,7 @@ if server
         end
 
         def do_PUT(req, res)
+            #do_check_auth(req, res)
             conn_id = req.path.split("/").last
             return if not s=get_socket(req,res)
             begin
@@ -157,6 +191,7 @@ if server
         end
 
         def do_GET(req, res)
+            #do_check_auth(req, res)
             conn_id = req.path.split("/").last
             return if not conn=get_socket(req,res)
             begin
@@ -182,6 +217,7 @@ if server
         end
 
         def do_DELETE(req, res)
+            do_check_auth(req, res)
             t=Time.now
             @@connections.delete_if do |conn_id, conn|
                 if t-conn[0] > SERVER_CONNECTION_TIMEOUT
@@ -197,7 +233,7 @@ if server
             close_socket(req, res)
             res.status=200 # OK
         end
-
+    
     end
 
     s = WEBrick::HTTPServer.new(
@@ -325,6 +361,26 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
     output_queue "\nThread started"
 
     # Open the connection
+    def do_auth(req)
+        if $auth_user_pwd != nil
+            req.basic_auth $auth_user_pwd[0], $auth_user_pwd[1]
+        end
+    end
+
+    def get_post_req(uri, dict)
+        req = Net::HTTP::Post.new(uri)
+        req.set_form_data(dict)
+        do_auth(req)
+        puts(req)
+        return req
+    end
+
+    def get_delete_req(uri)
+        req = Net::HTTP::Delete.new(uri)
+        do_auth(req)
+        return req
+    end
+
     http=nil
     begin
         begin
@@ -332,7 +388,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
             # HACK! new().start() because of https://bugs.ruby-lang.org/issues/13351
             http=Net::HTTP.new(url.host.delete("[]"), url.port).start
             begin
-                res = http.post("#{url.path}/#{conn_id}","#{remote_host}:#{remote_port}")
+                res = http.request(get_post_req("#{url.path}/#{conn_id}","#{remote_host}" => "#{remote_port}"))
                 if not res.kind_of? Net::HTTPCreated
                     output_queue "The bridge failed to connect to the remote location (#{res}): #{res.body}"
                     # Not connected, nothing more to do
@@ -434,7 +490,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
         if http
             begin
                 output_queue "Closing bridge connection to remote location"
-                http.delete("#{url.path}/#{conn_id}")
+                http.request(get_delete_req("#{url.path}/#{conn_id}"))
             ensure
                 http.finish
             end
