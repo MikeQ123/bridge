@@ -1,5 +1,17 @@
 # bridge
 
+2019-03-26:
+    Add post/delete basic_auth support
+    Add docker building support
+    Modify the startup parameters
+    
+    Now, you need start program using:
+        Use as server:
+            ./bridge server localPort bridgeLocation [auth]
+        Use as client:
+            ./bridge client localPort|STDIN bridgeURL remoteAddress remotePort [auth]
+
+
 brigde is a dynamic port forwarder over HTTP (with HTTP PROXY support)
 
 In some places, network is locked behind a firewall and Internet connection is available only by using a proxy server. If you wishes to connect to your SSH at home, you're in trouble. However, there is a simple solution to this: [tunneling over HTTPS](http://www.google.com.br/search?q=ssh+over+http+proxy). However, if you are one of those lucky guys that cannot use tunneling over HTTPS, this page can help you.
