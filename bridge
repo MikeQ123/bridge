@@ -387,8 +387,27 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
             output_queue "Opening connection over HTTP bridge for #{remote_host}:#{remote_port} (#{conn_id})"
             # HACK! new().start() because of https://bugs.ruby-lang.org/issues/13351
             http=Net::HTTP.new(url.host.delete("[]"), url.port).start
+            cookie=nil
             begin
                 res = http.request(get_post_req("#{url.path}/#{conn_id}","#{remote_host}" => "#{remote_port}"))
+                ############################################
+                unless res.response['set-cookie'].nil?
+                        cookie = res.response['set-cookie'].split('; ')[0]
+                end
+                until res.kind_of? Net::HTTPCreated do
+                    #$stderr.puts "Response Message - #{res.msg}"
+                    url = URI(res['location'])
+                    #$stderr.puts "Redirecting to URL - #{url}"
+                    Net::HTTP.new(url.host, url.port).start do |http|
+                        error=nil
+                        res = http.post("#{url.path}","#{remote_host}:#{remote_port}", { 'Cookie' => cookie })
+                        unless res.response['set-cookie'].nil?
+                            cookie = res.response['set-cookie'].split('; ')[0]
+                        end
+                        #$stderr.puts "################################################"
+                    end
+                end
+                ############################################
                 if not res.kind_of? Net::HTTPCreated
                     output_queue "The bridge failed to connect to the remote location (#{res}): #{res.body}"
                     # Not connected, nothing more to do
@@ -408,7 +427,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
                 Net::HTTP.new(url.host.delete("[]"), url.port).start do |http|
                     http.read_timeout=READ_TIMEOUT+3
                     while paired_thread.alive?
-                        res = http.get("#{url.path}/#{conn_id}")
+                        res = http.get("#{url.path}/#{conn_id}", { 'Cookie' => cookie })
                         if res.kind_of? Net::HTTPOK
                             _out.print res.body
                         elsif res.kind_of? Net::HTTPGone
@@ -464,7 +483,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
                         break
                     end
 
-                    res = http.put("#{url.path}/#{conn_id}",buf)
+                    res = http.put("#{url.path}/#{conn_id}",buf, { 'Cookie' => cookie })
                     if res.kind_of? Net::HTTPGone
                         output_queue "Connection closed in remote location (lr/rw)"
                         break
@@ -490,7 +509,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
         if http
             begin
                 output_queue "Closing bridge connection to remote location"
-                http.request(get_delete_req("#{url.path}/#{conn_id}"))
+                http.request(get_delete_req("#{url.path}/#{conn_id}"), { 'Cookie' => cookie })
             ensure
                 http.finish
             end
