@@ -367,16 +367,22 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
         end
     end
 
-    def get_post_req(uri, dict)
+    def get_post_req(uri, dict, cookie)
         req = Net::HTTP::Post.new(uri)
         req.set_form_data(dict)
+        unless cookie.nil?
+            req['Cookie'] = cookie
+        end
         do_auth(req)
         puts(req)
         return req
     end
 
-    def get_delete_req(uri,headers)
-        req = Net::HTTP.new(url.host.delete("[]"), url.port).delete(uri, headers)
+    def get_delete_req(uri, cookie)
+        req = Net::HTTP::Delete.new(uri)
+        unless cookie.nil?
+            req['Cookie'] = cookie
+        end
         do_auth(req)
         return req
     end
@@ -389,7 +395,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
             http=Net::HTTP.new(url.host.delete("[]"), url.port).start
             cookie=nil
             begin
-                res = http.request(get_post_req("#{url.path}/#{conn_id}","#{remote_host}" => "#{remote_port}"))
+                res = http.request(get_post_req("#{url.path}/#{conn_id}",{"#{remote_host}" =>  "#{remote_port}"}, "#{cookie}"))
                 ############################################
                 unless res.response['set-cookie'].nil?
                         cookie = res.response['set-cookie'].split('; ')[0]
@@ -400,7 +406,8 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
                     #$stderr.puts "Redirecting to URL - #{url}"
                     Net::HTTP.new(url.host, url.port).start do |http|
                         error=nil
-                        res = http.post("#{url.path}","#{remote_host}:#{remote_port}", { 'Cookie' => cookie })
+                        res = http.request(get_post_req("#{url.path}/#{conn_id}",{"#{remote_host}" =>  "#{remote_port}"}, "#{cookie}"))
+                        #res = http.post("#{url.path}","#{remote_host}:#{remote_port}", { 'Cookie' => cookie })
                         unless res.response['set-cookie'].nil?
                             cookie = res.response['set-cookie'].split('; ')[0]
                         end
@@ -509,7 +516,7 @@ lrrw.add(client_thread=Thread.new(_in,_out,uuid) do |_in,_out,conn_id| begin
         if http
             begin
                 output_queue "Closing bridge connection to remote location"
-                http.request(get_delete_req("#{url.path}/#{conn_id}", { 'Cookie' => cookie }))
+                http.request(get_delete_req("#{url.path}/#{conn_id}", "#{cookie}"))
             ensure
                 http.finish
             end
