@@ -312,7 +312,7 @@ else # Client
     else
         output_queue "Opening local port #{localPort}"
         local_server = Socket.new(:INET, :STREAM, 0)
-        local_server.bind Addrinfo.tcp("127.0.0.1", localPort.to_i)
+        local_server.bind Addrinfo.tcp("0.0.0.0", localPort.to_i)
         local_server.listen CLIENT_PENDING_CONNECTIONS
         Thread.abort_on_exception = false
     end
